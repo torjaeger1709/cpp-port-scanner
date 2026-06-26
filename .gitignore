@@ -1,0 +1,28 @@
+# Build Directories
+build/
+out/
+bin/
+
+# Temporary Scan Reports & Exports
+*.json
+*.csv
+*.xml
+imgui.ini
+
+# Executable & Library Binaries
+*.exe
+*.dll
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+
+# IDE & OS Caches
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+Thumbs.db
+.DS_Store
