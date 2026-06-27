@@ -22,7 +22,7 @@ static ID3D11RenderTargetView*  g_mainRenderTargetView = nullptr;
 
 bool CreateDeviceD3D(HWND hWnd);
 void CleanupDeviceD3D();
-void CreateRenderTarget();
+bool CreateRenderTarget();
 void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -76,9 +76,11 @@ int main(int, char**) {
 
         if (g_ResizeWidth != 0 && g_ResizeHeight != 0) {
             CleanupRenderTarget();
-            g_pSwapChain->ResizeBuffers(0, g_ResizeWidth, g_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
+            HRESULT hr = g_pSwapChain->ResizeBuffers(0, g_ResizeWidth, g_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
             g_ResizeWidth = g_ResizeHeight = 0;
-            CreateRenderTarget();
+            if (SUCCEEDED(hr)) {
+                CreateRenderTarget();
+            }
         }
 
         ImGui_ImplDX11_NewFrame();
@@ -90,9 +92,11 @@ int main(int, char**) {
 
         ImGui::Render();
         const float clear_color_with_alpha[4] = { 0.06f, 0.09f, 0.16f, 1.00f };
-        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
-        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color_with_alpha);
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        if (g_mainRenderTargetView) {
+            g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
+            g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color_with_alpha);
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        }
 
         g_pSwapChain->Present(1, 0); // VSync enabled
     }
@@ -137,8 +141,7 @@ bool CreateDeviceD3D(HWND hWnd) {
     if (res != S_OK)
         return false;
 
-    CreateRenderTarget();
-    return true;
+    return CreateRenderTarget();
 }
 
 void CleanupDeviceD3D() {
@@ -148,11 +151,15 @@ void CleanupDeviceD3D() {
     if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
 }
 
-void CreateRenderTarget() {
+bool CreateRenderTarget() {
     ID3D11Texture2D* pBackBuffer = nullptr;
-    g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
-    g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
+    HRESULT hr = g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
+    if (FAILED(hr) || pBackBuffer == nullptr) {
+        return false;
+    }
+    hr = g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
     pBackBuffer->Release();
+    return SUCCEEDED(hr) && g_mainRenderTargetView != nullptr;
 }
 
 void CleanupRenderTarget() {

@@ -4,6 +4,7 @@
 #include "common.h"
 #include "thread_pool.h"
 #include <vector>
+#include <deque>
 #include <string>
 #include <mutex>
 #include <thread>
@@ -14,6 +15,11 @@ class ScanController {
 public:
     ScanController();
     ~ScanController();
+
+    ScanController(const ScanController&) = delete;
+    ScanController& operator=(const ScanController&) = delete;
+    ScanController(ScanController&&) = delete;
+    ScanController& operator=(ScanController&&) = delete;
 
     // Trigger asynchronous background network scan (zero GUI freezing)
     void start_scan(const ScanConfig& user_config);
@@ -39,18 +45,20 @@ public:
     bool export_report(const std::string& filepath, OutputFormat format);
 
 private:
+    std::mutex state_mutex;
     std::atomic<bool> scanning{false};
-    std::atomic<bool> cancel_flag{false};
+    std::shared_ptr<std::atomic<bool>> cancel_token = std::make_shared<std::atomic<bool>>(false);
     std::atomic<size_t> completed_count{0};
     std::atomic<size_t> total_count{0};
 
     std::mutex logs_mutex;
-    std::vector<std::string> logs;
+    std::deque<std::string> logs;
 
     std::mutex results_mutex;
     std::vector<HostResult> host_results;
 
     std::thread scan_thread;
+    std::thread background_cleaner;
     std::unique_ptr<ThreadPool> pool;
     ScanConfig current_config;
 };

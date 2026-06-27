@@ -15,13 +15,20 @@
 
 namespace GuiView {
 
-static char target_buf[256] = "scanme.nmap.org";
-static char port_buf[256] = "22,80,443";
-static char export_buf[256] = "report.json";
-static int scan_tech_idx = 0; // 0: Connect, 1: SYN, 2: FIN, 3: XMAS, 4: NULL_SCAN
-static int threads_val = 100;
-static int timeout_val = 1000;
-static int export_fmt_idx = 0; // 0: JSON, 1: CSV, 2: XML
+struct GuiState {
+    char target_buf[256] = "scanme.nmap.org";
+    char port_buf[256] = "22,80,443";
+    char export_buf[256] = "report.json";
+    int scan_tech_idx = 0; // 0: Connect, 1: SYN, 2: FIN, 3: XMAS, 4: NULL_SCAN
+    int threads_val = 100;
+    int timeout_val = 1000;
+    int export_fmt_idx = 0; // 0: JSON, 1: CSV, 2: XML
+};
+
+static GuiState& get_state() {
+    static GuiState state;
+    return state;
+}
 
 void setup_theme() {
     ImGuiStyle& style = ImGui::GetStyle();
@@ -106,6 +113,7 @@ static std::vector<int> parse_gui_ports(const char* p_str) {
 }
 
 void render_ui(ScanController& controller) {
+    GuiState& s = get_state();
     ImGuiIO& io = ImGui::GetIO();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(io.DisplaySize);
@@ -129,14 +137,14 @@ void render_ui(ScanController& controller) {
         ImGui::Text("Target Specification (IP, Domain, or CIDR Subnet):");
         ImGui::BeginDisabled(is_busy);
         ImGui::SetNextItemWidth(-1);
-        ImGui::InputText("##target", target_buf, sizeof(target_buf));
+        ImGui::InputText("##target", s.target_buf, sizeof(s.target_buf));
         ImGui::EndDisabled();
 
         ImGui::Spacing();
         ImGui::Text("Port Range / List (e.g., 80,443 | 1-1024):");
         ImGui::BeginDisabled(is_busy);
         ImGui::SetNextItemWidth(-1);
-        ImGui::InputText("##ports", port_buf, sizeof(port_buf));
+        ImGui::InputText("##ports", s.port_buf, sizeof(s.port_buf));
         ImGui::EndDisabled();
 
         ImGui::Spacing();
@@ -145,17 +153,17 @@ void render_ui(ScanController& controller) {
         
         // Synced Slider + InputInt for precise thread control
         ImGui::SetNextItemWidth(-110);
-        ImGui::SliderInt("##th_slide", &threads_val, 1, 500, "Threads: %d"); ImGui::SameLine();
+        ImGui::SliderInt("##th_slide", &s.threads_val, 1, 500, "Threads: %d"); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
-        ImGui::InputInt("##th_input", &threads_val, 10, 50);
-        threads_val = std::max(1, std::min(1000, threads_val));
+        ImGui::InputInt("##th_input", &s.threads_val, 10, 50);
+        s.threads_val = std::max(1, std::min(1000, s.threads_val));
 
         // Synced Slider + InputInt for timeout control
         ImGui::SetNextItemWidth(-110);
-        ImGui::SliderInt("##to_slide", &timeout_val, 50, 5000, "Timeout: %dms"); ImGui::SameLine();
+        ImGui::SliderInt("##to_slide", &s.timeout_val, 50, 5000, "Timeout: %dms"); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
-        ImGui::InputInt("##to_input", &timeout_val, 100, 500);
-        timeout_val = std::max(10, std::min(10000, timeout_val));
+        ImGui::InputInt("##to_input", &s.timeout_val, 100, 500);
+        s.timeout_val = std::max(10, std::min(10000, s.timeout_val));
         
         ImGui::EndDisabled();
 
@@ -164,11 +172,11 @@ void render_ui(ScanController& controller) {
         ImGui::BeginDisabled(is_busy);
         // Extended vertical box height (180px) with explicit NoScrollbar flag for clean look
         ImGui::BeginChild("TechniqueBox", ImVec2(-1, 180.0f), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-        ImGui::RadioButton("-sT (Standard TCP Connect Scan - Default)", &scan_tech_idx, 0);
-        ImGui::RadioButton("-sS (Stealth TCP SYN Scan - Half-Open)", &scan_tech_idx, 1);
-        ImGui::RadioButton("-sF (Stealth TCP FIN Scan - RFC 793 Inverse)", &scan_tech_idx, 2);
-        ImGui::RadioButton("-sX (Stealth TCP XMAS Scan - FIN+PSH+URG)", &scan_tech_idx, 3);
-        ImGui::RadioButton("-sN (Stealth TCP NULL Scan - Zero Flags)", &scan_tech_idx, 4);
+        ImGui::RadioButton("-sT (Standard TCP Connect Scan - Default)", &s.scan_tech_idx, 0);
+        ImGui::RadioButton("-sS (Stealth TCP SYN Scan - Half-Open)", &s.scan_tech_idx, 1);
+        ImGui::RadioButton("-sF (Stealth TCP FIN Scan - RFC 793 Inverse)", &s.scan_tech_idx, 2);
+        ImGui::RadioButton("-sX (Stealth TCP XMAS Scan - FIN+PSH+URG)", &s.scan_tech_idx, 3);
+        ImGui::RadioButton("-sN (Stealth TCP NULL Scan - Zero Flags)", &s.scan_tech_idx, 4);
         ImGui::EndChild();
         ImGui::EndDisabled();
 
@@ -185,11 +193,17 @@ void render_ui(ScanController& controller) {
         if (ImGui::Button("START SCAN", ImVec2(180, 42))) {
             controller.clear_logs();
             ScanConfig cfg;
-            cfg.target_raw = target_buf;
-            cfg.ports = parse_gui_ports(port_buf);
-            cfg.threads = threads_val;
-            cfg.timeout_ms = timeout_val;
-            cfg.scan_type = static_cast<ScanType>(scan_tech_idx);
+            cfg.target_raw = s.target_buf;
+            cfg.ports = parse_gui_ports(s.port_buf);
+            cfg.threads = s.threads_val;
+            cfg.timeout_ms = s.timeout_val;
+            static const ScanType scan_type_lookup[] = {
+                ScanType::CONNECT, ScanType::SYN, ScanType::FIN, ScanType::XMAS, ScanType::NULL_SCAN
+            };
+            if (s.scan_tech_idx < 0 || s.scan_tech_idx >= static_cast<int>(sizeof(scan_type_lookup)/sizeof(scan_type_lookup[0]))) {
+                s.scan_tech_idx = 0;
+            }
+            cfg.scan_type = scan_type_lookup[s.scan_tech_idx];
             controller.start_scan(cfg);
         }
         ImGui::PopStyleColor(2);
@@ -203,19 +217,7 @@ void render_ui(ScanController& controller) {
     }
 
     ImGui::SameLine();
-    ImGui::Text("Engine State:"); ImGui::SameLine();
-    if (is_busy) {
-        const char* spinner[] = { "|", "/", "-", "\\" };
-        int spin_idx = static_cast<int>(ImGui::GetTime() * 10.0) % 4;
-        ImGui::TextColored(ImVec4(0.98f, 0.75f, 0.10f, 1.00f), "%s SCANNING IN PROGRESS... (%.1f%% - %zu / %zu tasks)", spinner[spin_idx], progress * 100.0f, controller.get_completed_count(), controller.get_total_count());
-    } else {
-        ImGui::TextColored(ImVec4(0.05f, 0.80f, 0.55f, 1.00f), "[Ready] IDLE / Awaiting User Instructions");
-    }
-
-    // Animated Progress Bar with explicit text overlay
-    char prog_overlay[64];
-    std::snprintf(prog_overlay, sizeof(prog_overlay), "%.1f%% (%zu / %zu)", progress * 100.0f, controller.get_completed_count(), controller.get_total_count());
-    ImGui::ProgressBar(progress, ImVec2(-1, 20), prog_overlay);
+    ImGui::ProgressBar(progress, ImVec2(-1, 42), is_busy ? "Scanning in progress..." : "Idle / Ready");
 
     ImGui::Spacing();
 
@@ -237,6 +239,8 @@ void render_ui(ScanController& controller) {
         ImGui::EndChild();
     }
 
+    ImGui::Spacing();
+
     ImGui::TextColored(ImVec4(0.02f, 0.85f, 0.98f, 1.00f), "Discovered Port Results Table:");
     if (ImGui::BeginChild("TableChild", ImVec2(-1, child_height), true)) {
         // Optimized Data Table Widths: Fixed compact widths for short status fields, large flexible weights for banners
@@ -250,23 +254,59 @@ void render_ui(ScanController& controller) {
             ImGui::TableSetupColumn("Service Banner", ImGuiTableColumnFlags_WidthStretch, 2.0f);
             ImGui::TableHeadersRow();
 
-            auto res = controller.get_results();
-            for (const auto& hr : res) {
-                for (const auto& pr : hr.ports) {
+            struct FlatRow {
+                const std::string* ip;
+                const std::string* hostname;
+                int port;
+                PortStatus status;
+                const std::string* service_name;
+            };
+            static std::vector<HostResult> cached_res;
+            static std::vector<FlatRow> flat_rows;
+            static float last_fetch_time = -10.0f;
+            float now = (float)ImGui::GetTime();
+
+            if (is_busy) {
+                if (now - last_fetch_time > 0.2f) {
+                    cached_res = controller.get_results();
+                    flat_rows.clear();
+                    for (const auto& hr : cached_res) {
+                        for (const auto& pr : hr.ports) {
+                            flat_rows.push_back({&hr.ip, &hr.hostname, pr.port, pr.status, &pr.service_name});
+                        }
+                    }
+                    last_fetch_time = now;
+                }
+            } else if (last_fetch_time != -1.0f) {
+                cached_res = controller.get_results();
+                flat_rows.clear();
+                for (const auto& hr : cached_res) {
+                    for (const auto& pr : hr.ports) {
+                        flat_rows.push_back({&hr.ip, &hr.hostname, pr.port, pr.status, &pr.service_name});
+                    }
+                }
+                last_fetch_time = -1.0f;
+            }
+
+            ImGuiListClipper clipper;
+            clipper.Begin(static_cast<int>(flat_rows.size()));
+            while (clipper.Step()) {
+                for (int row_idx = clipper.DisplayStart; row_idx < clipper.DisplayEnd; row_idx++) {
+                    const auto& item = flat_rows[row_idx];
                     ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(hr.ip.c_str());
-                    ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(hr.hostname.c_str());
-                    ImGui::TableSetColumnIndex(2); ImGui::Text("%d", pr.port);
+                    ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(item.ip->c_str());
+                    ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(item.hostname->c_str());
+                    ImGui::TableSetColumnIndex(2); ImGui::Text("%d", item.port);
                     ImGui::TableSetColumnIndex(3); ImGui::TextUnformatted("tcp");
                     ImGui::TableSetColumnIndex(4);
-                    if (pr.status == PortStatus::OPEN) {
+                    if (item.status == PortStatus::OPEN) {
                         ImGui::TextColored(ImVec4(0.05f, 0.85f, 0.55f, 1.0f), "OPEN");
-                    } else if (pr.status == PortStatus::FILTERED) {
+                    } else if (item.status == PortStatus::FILTERED) {
                         ImGui::TextColored(ImVec4(0.98f, 0.75f, 0.10f, 1.0f), "FILTERED");
                     } else {
                         ImGui::TextColored(ImVec4(0.55f, 0.60f, 0.68f, 1.0f), "CLOSED");
                     }
-                    ImGui::TableSetColumnIndex(5); ImGui::TextUnformatted(pr.service_name.c_str());
+                    ImGui::TableSetColumnIndex(5); ImGui::TextUnformatted(item.service_name->c_str());
                 }
             }
             ImGui::EndTable();
@@ -277,14 +317,17 @@ void render_ui(ScanController& controller) {
     // Export Footer
     ImGui::Text("Export Scan Report:"); ImGui::SameLine();
     ImGui::SetNextItemWidth(180);
-    ImGui::InputText("##export_file", export_buf, sizeof(export_buf)); ImGui::SameLine();
+    ImGui::InputText("##export_file", s.export_buf, sizeof(s.export_buf)); ImGui::SameLine();
     ImGui::SetNextItemWidth(100);
-    ImGui::Combo("##export_fmt", &export_fmt_idx, "JSON\0CSV\0XML\0\0"); ImGui::SameLine();
+    ImGui::Combo("##export_fmt", &s.export_fmt_idx, "JSON\0CSV\0XML\0\0"); ImGui::SameLine();
     if (ImGui::Button("SAVE REPORT")) {
-        OutputFormat f = OutputFormat::JSON;
-        if (export_fmt_idx == 1) f = OutputFormat::CSV;
-        else if (export_fmt_idx == 2) f = OutputFormat::XML;
-        controller.export_report(export_buf, f);
+        static const OutputFormat export_fmt_lookup[] = {
+            OutputFormat::JSON, OutputFormat::CSV, OutputFormat::XML
+        };
+        if (s.export_fmt_idx < 0 || s.export_fmt_idx >= static_cast<int>(sizeof(export_fmt_lookup)/sizeof(export_fmt_lookup[0]))) {
+            s.export_fmt_idx = 0;
+        }
+        controller.export_report(s.export_buf, export_fmt_lookup[s.export_fmt_idx]);
     }
 
     ImGui::End();

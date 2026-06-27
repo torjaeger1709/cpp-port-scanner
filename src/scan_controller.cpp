@@ -2,6 +2,7 @@
 #include "target_helper.h"
 #include "scanner_engine.h"
 #include "report_generator.h"
+#include "raw_socket.h"
 #include <iostream>
 #include <algorithm>
 
@@ -11,38 +12,62 @@ ScanController::ScanController() {
 }
 
 ScanController::~ScanController() {
-    stop_scan();
+    {
+        std::lock_guard<std::mutex> lock(state_mutex);
+        if (cancel_token) cancel_token->store(true);
+        if (pool) pool->clear_queue();
+        scanning = false;
+    }
+    if (scan_thread.joinable()) scan_thread.join();
+    if (background_cleaner.joinable()) background_cleaner.join();
     TargetHelper::cleanup_networking();
 }
 
 void ScanController::start_scan(const ScanConfig& user_config) {
+    std::lock_guard<std::mutex> lock(state_mutex);
     if (scanning.load()) return;
 
-    stop_scan(); // Ensure previous joinable thread is completely joined
+    if (background_cleaner.joinable()) {
+        background_cleaner.join();
+    }
+    if (scan_thread.joinable()) {
+        scan_thread.join();
+    }
 
     scanning = true;
-    cancel_flag = false;
+    cancel_token = std::make_shared<std::atomic<bool>>(false);
     completed_count = 0;
     total_count = 1; // Prevent 0 division before target expansion
 
     current_config = user_config;
+    RawSocket::reset_warnings();
 
     {
-        std::lock_guard<std::mutex> lock(results_mutex);
+        std::lock_guard<std::mutex> res_lock(results_mutex);
         host_results.clear();
     }
 
     add_log("[*] Dispatching asynchronous worker thread...");
 
     scan_thread = std::thread([this]() {
+        // Attach lock-free atomic observers early for resolution logging
+        current_config.cancel_token = cancel_token;
+        current_config.progress_cb = [this]() {
+            completed_count++;
+        };
+        current_config.log_cb = [this](const std::string& msg) {
+            add_log(msg);
+        };
+
         add_log("[*] Resolving target specification: " + current_config.target_raw + "...");
-        current_config.target_ips = TargetHelper::resolve_targets(current_config.target_raw);
+        current_config.target_ips = TargetHelper::resolve_targets(current_config.target_raw, current_config.log_cb);
 
         size_t total_calc = current_config.target_ips.size() * current_config.ports.size();
         total_count = total_calc > 0 ? total_calc : 1;
 
         if (total_calc == 0) {
             add_log("[Error] Target expansion yielded 0 valid targets. Aborting scan.");
+            std::lock_guard<std::mutex> st_lock(state_mutex);
             scanning = false;
             return;
         }
@@ -55,45 +80,55 @@ void ScanController::start_scan(const ScanConfig& user_config) {
 
         add_log("[+] Resolved " + std::to_string(current_config.target_ips.size()) + " host(s). Launching " + tech_str + " across " + std::to_string(current_config.ports.size()) + " port(s)...");
 
-        pool = std::make_unique<ThreadPool>(static_cast<size_t>(current_config.threads));
-
-        // Attach lock-free atomic observers
-        current_config.cancel_token = &cancel_flag;
-        current_config.progress_cb = [this]() {
-            completed_count++;
-        };
-        current_config.log_cb = [this](const std::string& msg) {
-            add_log(msg);
-        };
+        {
+            std::lock_guard<std::mutex> st_lock(state_mutex);
+            if (cancel_token && cancel_token->load()) {
+                scanning = false;
+                return;
+            }
+            pool = std::make_unique<ThreadPool>(static_cast<size_t>(current_config.threads));
+        }
 
         auto res = ScannerEngine::scan_all(current_config, *pool);
 
         {
-            std::lock_guard<std::mutex> lock(results_mutex);
+            std::lock_guard<std::mutex> res_lock(results_mutex);
             host_results = std::move(res);
         }
 
         add_log("[+] Scan session finalized successfully.");
-        scanning = false;
+        {
+            std::lock_guard<std::mutex> st_lock(state_mutex);
+            scanning = false;
+        }
     });
 }
 
 void ScanController::stop_scan() {
+    std::lock_guard<std::mutex> lock(state_mutex);
     if (!scanning.load() && !scan_thread.joinable()) return;
 
     add_log("[Warning] Cancellation requested. Stopping worker pool...");
-    cancel_flag = true;
+    if (cancel_token) {
+        cancel_token->store(true);
+    }
     
     if (pool) {
         pool->clear_queue();
     }
+    scanning = false;
 
-    if (scan_thread.joinable()) {
-        scan_thread.join();
+    if (background_cleaner.joinable()) {
+        background_cleaner.join();
     }
 
-    scanning = false;
-    add_log("[*] Background thread joined cleanly.");
+    if (scan_thread.joinable()) {
+        background_cleaner = std::thread([t = std::move(scan_thread), p = std::move(pool), this]() mutable {
+            if (t.joinable()) t.join();
+            p.reset();
+            add_log("[*] Background thread joined cleanly.");
+        });
+    }
 }
 
 float ScanController::get_progress() const {
@@ -105,19 +140,16 @@ float ScanController::get_progress() const {
 
 std::vector<std::string> ScanController::get_logs() {
     std::vector<std::string> copy;
-    // Use non-blocking try_lock to completely eliminate UI FPS drops
-    if (logs_mutex.try_lock()) {
-        copy = logs;
-        logs_mutex.unlock();
-    }
+    std::lock_guard<std::mutex> lock(logs_mutex);
+    copy.assign(logs.begin(), logs.end());
     return copy;
 }
 
 void ScanController::add_log(const std::string& msg) {
     std::lock_guard<std::mutex> lock(logs_mutex);
     logs.push_back(msg);
-    if (logs.size() > 1000) {
-        logs.erase(logs.begin(), logs.begin() + 100); // Ring buffer trimming
+    while (logs.size() > 1000) {
+        logs.pop_front();
     }
 }
 
