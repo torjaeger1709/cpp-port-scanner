@@ -5,6 +5,8 @@
 #include <string>
 #include <cstdint>
 
+namespace RawSocket {
+
 #pragma pack(push, 1)
 
 struct IPv4Header {
@@ -42,7 +44,11 @@ struct PseudoHeader {
 
 #pragma pack(pop)
 
-namespace RawSocket {
+    // Reset one-time warning flags displayed in logs/console
+    void reset_warnings();
+
+    // Stop sniffer thread and cleanup dispatcher resources
+    void cleanup_sniffer();
 
     // Discover local interface IPv4 address routing to target
     std::string get_local_ip(const std::string& target_ip);
