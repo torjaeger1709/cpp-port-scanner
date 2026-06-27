@@ -17,14 +17,15 @@ ThreadPool::ThreadPool(size_t num_threads) {
 
                     task = std::move(this->tasks.front());
                     this->tasks.pop();
+                    this->running_tasks++;
                 }
 
                 task();
 
                 {
                     std::lock_guard<std::mutex> lock(this->queue_mutex);
-                    active_tasks--;
-                    if (tasks.empty() && active_tasks == 0) {
+                    running_tasks--;
+                    if (tasks.empty() && running_tasks == 0) {
                         cv_finished.notify_all();
                     }
                 }
@@ -50,7 +51,6 @@ void ThreadPool::enqueue(std::function<void()> task) {
     {
         std::lock_guard<std::mutex> lock(queue_mutex);
         tasks.push(std::move(task));
-        active_tasks++;
     }
     cv_task.notify_one();
 }
@@ -58,21 +58,15 @@ void ThreadPool::enqueue(std::function<void()> task) {
 void ThreadPool::wait_until_empty() {
     std::unique_lock<std::mutex> lock(queue_mutex);
     cv_finished.wait(lock, [this]() {
-        return tasks.empty() && active_tasks == 0;
+        return tasks.empty() && running_tasks == 0;
     });
 }
 
 void ThreadPool::clear_queue() {
     std::lock_guard<std::mutex> lock(queue_mutex);
-    size_t purged = tasks.size();
     std::queue<std::function<void()>> empty;
     std::swap(tasks, empty);
-    if (active_tasks >= purged) {
-        active_tasks -= purged;
-    } else {
-        active_tasks = 0;
-    }
-    if (tasks.empty() && active_tasks == 0) {
+    if (tasks.empty() && running_tasks == 0) {
         cv_finished.notify_all();
     }
 }

@@ -14,6 +14,11 @@ public:
     explicit ThreadPool(size_t num_threads);
     ~ThreadPool();
 
+    ThreadPool(const ThreadPool&) = delete;
+    ThreadPool& operator=(const ThreadPool&) = delete;
+    ThreadPool(ThreadPool&&) = delete;
+    ThreadPool& operator=(ThreadPool&&) = delete;
+
     // Enqueue a new task into the pool
     void enqueue(std::function<void()> task);
 
@@ -31,8 +36,8 @@ private:
     std::condition_variable cv_task;
     std::condition_variable cv_finished;
 
-    std::atomic<size_t> active_tasks{0};
-    bool stop = false;
+    std::atomic<size_t> running_tasks{0};
+    std::atomic<bool> stop{false};
 };
 
 #endif // PORTSCANNER_THREAD_POOL_H

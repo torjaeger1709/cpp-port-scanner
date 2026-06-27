@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <atomic>
+#include <memory>
 
 enum class PortStatus {
     OPEN,
@@ -54,7 +55,7 @@ struct ScanConfig {
     // MVC & Enterprise GUI Asynchronous Observers (Optional)
     std::function<void()> progress_cb = nullptr;                      // Called on each port task completion
     std::function<void(const std::string& log_msg)> log_cb = nullptr; // Real-time UI log event
-    std::atomic<bool>* cancel_token = nullptr;                        // Cancellation flag for graceful join
+    std::shared_ptr<std::atomic<bool>> cancel_token = nullptr;        // Cancellation flag for graceful join
 };
 
 #endif // PORTSCANNER_COMMON_H
