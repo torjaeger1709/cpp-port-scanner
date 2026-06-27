@@ -16,7 +16,6 @@ namespace CLIParser {
 void print_help(const char* prog_name) {
     std::cout << "=================================================================\n";
     std::cout << "                   C++ MODULAR CLI PORT SCANNER\n";
-    std::cout << "                     Provided by Khiem Nguyen\n";
     std::cout << "=================================================================\n";
     std::cout << "Usage:\n";
     std::cout << "  " << prog_name << " -t <target> -p <ports> [scan technique] [options]\n\n";
@@ -89,6 +88,8 @@ ScanConfig parse(int argc, char* argv[]) {
         return config;
     }
 
+    bool format_explicit = false;
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
@@ -125,6 +126,7 @@ ScanConfig parse(int argc, char* argv[]) {
             }
         } else if (arg == "-f" || arg == "--format") {
             if (i + 1 < argc) {
+                format_explicit = true;
                 std::string fmt = to_lower(argv[++i]);
                 if (fmt == "json") config.format = OutputFormat::JSON;
                 else if (fmt == "csv") config.format = OutputFormat::CSV;
@@ -143,6 +145,8 @@ ScanConfig parse(int argc, char* argv[]) {
                 } catch (...) {
                     std::cerr << "[Error] Invalid value for threads.\n";
                 }
+            } else {
+                std::cerr << "[Error] Missing value for argument " << arg << std::endl;
             }
         } else if (arg == "--timeout") {
             if (i + 1 < argc) {
@@ -151,15 +155,19 @@ ScanConfig parse(int argc, char* argv[]) {
                 } catch (...) {
                     std::cerr << "[Error] Invalid value for timeout.\n";
                 }
+            } else {
+                std::cerr << "[Error] Missing value for argument " << arg << std::endl;
             }
         } else {
             std::cerr << "[Warning] Ignoring unrecognized argument: " << arg << std::endl;
         }
     }
 
-    if (!config.output_file.empty()) {
+    if (!config.output_file.empty() && !format_explicit) {
         std::string lower_out = to_lower(config.output_file);
-        if (lower_out.size() >= 4 && lower_out.substr(lower_out.size() - 4) == ".csv") {
+        if (lower_out.size() >= 5 && lower_out.substr(lower_out.size() - 5) == ".json") {
+            config.format = OutputFormat::JSON;
+        } else if (lower_out.size() >= 4 && lower_out.substr(lower_out.size() - 4) == ".csv") {
             config.format = OutputFormat::CSV;
         } else if (lower_out.size() >= 4 && lower_out.substr(lower_out.size() - 4) == ".xml") {
             config.format = OutputFormat::XML;
