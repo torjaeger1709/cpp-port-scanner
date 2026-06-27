@@ -1,8 +1,10 @@
 #include "target_helper.h"
+#include "raw_socket.h"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
 #include <cstring>
+#include <mutex>
 
 #ifdef _WIN32
   #ifndef WIN32_LEAN_AND_MEAN
@@ -32,6 +34,7 @@ bool init_networking() {
 }
 
 void cleanup_networking() {
+    RawSocket::cleanup_sniffer();
 #ifdef _WIN32
     WSACleanup();
 #endif
@@ -61,8 +64,19 @@ static std::string host_int_to_ip(uint32_t ip_int) {
     return "";
 }
 
-std::vector<std::string> resolve_targets(const std::string& raw_target) {
+static std::mutex g_io_mutex;
+
+std::vector<std::string> resolve_targets(const std::string& raw_target, const std::function<void(const std::string&)>& log_cb) {
     std::vector<std::string> results;
+
+    auto log_msg = [&](const std::string& msg) {
+        if (log_cb) {
+            log_cb(msg);
+        } else {
+            std::lock_guard<std::mutex> lock(g_io_mutex);
+            std::cerr << msg << std::endl;
+        }
+    };
 
     // Check CIDR format (e.g., 192.168.1.0/24)
     size_t slash_pos = raw_target.find('/');
@@ -71,7 +85,7 @@ std::vector<std::string> resolve_targets(const std::string& raw_target) {
         std::string prefix_str = raw_target.substr(slash_pos + 1);
 
         if (!is_valid_ipv4(base_ip)) {
-            std::cerr << "[Error] Invalid base IP address in CIDR target: " << base_ip << std::endl;
+            log_msg("[Error] Invalid base IP address in CIDR target: " + base_ip);
             return results;
         }
 
@@ -79,12 +93,12 @@ std::vector<std::string> resolve_targets(const std::string& raw_target) {
         try {
             prefix = std::stoi(prefix_str);
         } catch (...) {
-            std::cerr << "[Error] Invalid CIDR subnet prefix: " << prefix_str << std::endl;
+            log_msg("[Error] Invalid CIDR subnet prefix: " + prefix_str);
             return results;
         }
 
         if (prefix < 0 || prefix > 32) {
-            std::cerr << "[Error] CIDR prefix must be between 0 and 32." << std::endl;
+            log_msg("[Error] CIDR prefix must be between 0 and 32.");
             return results;
         }
 
@@ -101,17 +115,19 @@ std::vector<std::string> resolve_targets(const std::string& raw_target) {
             end = broadcast - 1;
         }
 
-        // Memory protection against excessive expansion (> 65536 hosts)
         if (end < start) {
             return results;
         }
-        if (end - start > 65536) {
-            std::cerr << "[Warning] Subnet range is too large (" << (end - start + 1) << " hosts). Limiting scan to the first 65536 hosts." << std::endl;
-            end = start + 65536;
+
+        static constexpr uint64_t MAX_CIDR_HOSTS = 65536;
+        uint64_t host_count = static_cast<uint64_t>(end) - start + 1;
+        if (host_count > MAX_CIDR_HOSTS) {
+            log_msg("[Warning] Subnet range is too large (" + std::to_string(host_count) + " hosts). Limiting scan to the first " + std::to_string(MAX_CIDR_HOSTS) + " hosts.");
+            end = static_cast<uint32_t>(start + MAX_CIDR_HOSTS - 1);
         }
 
-        for (uint32_t curr = start; curr <= end; ++curr) {
-            results.push_back(host_int_to_ip(curr));
+        for (uint64_t curr = start; curr <= end; ++curr) {
+            results.push_back(host_int_to_ip(static_cast<uint32_t>(curr)));
         }
 
         return results;
@@ -130,18 +146,20 @@ std::vector<std::string> resolve_targets(const std::string& raw_target) {
 
     int status = getaddrinfo(raw_target.c_str(), nullptr, &hints, &res);
     if (status != 0 || res == nullptr) {
-        std::cerr << "[Error] Failed to resolve DNS for target: '" << raw_target << "'" << std::endl;
+        log_msg("[Error] Failed to resolve DNS for target: '" + raw_target + "'");
         return results;
     }
 
     for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
-        auto* ipv4 = reinterpret_cast<struct sockaddr_in*>(p->ai_addr);
-        char ip_str[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &(ipv4->sin_addr), ip_str, INET_ADDRSTRLEN);
-        
-        std::string ip_obj(ip_str);
-        if (std::find(results.begin(), results.end(), ip_obj) == results.end()) {
-            results.push_back(ip_obj);
+        if (p->ai_family == AF_INET && p->ai_addr != nullptr) {
+            auto* ipv4 = reinterpret_cast<struct sockaddr_in*>(p->ai_addr);
+            char ip_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &(ipv4->sin_addr), ip_str, INET_ADDRSTRLEN);
+            
+            std::string ip_obj(ip_str);
+            if (std::find(results.begin(), results.end(), ip_obj) == results.end()) {
+                results.push_back(ip_obj);
+            }
         }
     }
 

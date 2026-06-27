@@ -60,22 +60,30 @@ std::string get_service_name(int port) {
     return "unknown";
 }
 
-static std::string grab_banner(SOCKET sock, int port, int timeout_ms) {
+static std::string grab_banner(SOCKET sock, int port, int timeout_ms, const std::string& ip) {
     // Switch socket back to blocking mode for reliable handshake I/O
 #ifdef _WIN32
     u_long mode = 0;
-    ioctlsocket(sock, FIONBIO, &mode);
+    if (ioctlsocket(sock, FIONBIO, &mode) != 0) {
+        return get_service_name(port);
+    }
     DWORD timeout = timeout_ms;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout)) == SOCKET_ERROR ||
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout)) == SOCKET_ERROR) {
+        return get_service_name(port);
+    }
 #else
     int flags = fcntl(sock, F_GETFL, 0);
-    fcntl(sock, F_SETFL, flags & ~O_NONBLOCK);
+    if (flags == -1 || fcntl(sock, F_SETFL, flags & ~O_NONBLOCK) != 0) {
+        return get_service_name(port);
+    }
     struct timeval tv{};
     tv.tv_sec = timeout_ms / 1000;
     tv.tv_usec = (timeout_ms % 1000) * 1000;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == SOCKET_ERROR ||
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == SOCKET_ERROR) {
+        return get_service_name(port);
+    }
 #endif
 
     char buf[256]{};
@@ -99,11 +107,14 @@ static std::string grab_banner(SOCKET sock, int port, int timeout_ms) {
     if (has_data) {
         int bytes = recv(sock, buf, sizeof(buf) - 1, 0);
         if (bytes > 0) {
-            std::string res(buf);
+            std::string res(buf, bytes);
             if (res.find("SSH-") != std::string::npos) {
                 size_t eol = res.find('\n');
-                std::string ver = res.substr(0, eol > 0 && res[eol-1] == '\r' ? eol - 1 : eol);
-                return "ssh (" + ver + ")";
+                if (eol != std::string::npos) {
+                    std::string ver = res.substr(0, (eol > 0 && res[eol-1] == '\r') ? eol - 1 : eol);
+                    return "ssh (" + ver + ")";
+                }
+                return "ssh";
             } else if (res.find("220 ") != std::string::npos || res.find("FTP") != std::string::npos) {
                 return "ftp";
             } else if (res.find("SMTP") != std::string::npos || res.find("ESMTP") != std::string::npos) {
@@ -120,21 +131,23 @@ static std::string grab_banner(SOCKET sock, int port, int timeout_ms) {
     }
 
     // Stage 2: Active Banner Grabbing (Client-speak-first: HTTP, etc.)
-    // If server stayed silent during passive phase, proactively transmit HTTP GET probe
-    const char* http_probe = "GET / HTTP/1.0\r\n\r\n";
-    send(sock, http_probe, static_cast<int>(std::strlen(http_probe)), 0);
+    // Proactively transmit HTTP GET probe with Host header
+    std::string http_probe = "GET / HTTP/1.1\r\nHost: " + ip + "\r\nUser-Agent: CppPortScanner/1.0\r\nConnection: close\r\n\r\n";
+    send(sock, http_probe.c_str(), static_cast<int>(http_probe.length()), 0);
 
     std::memset(buf, 0, sizeof(buf));
     int bytes = recv(sock, buf, sizeof(buf) - 1, 0);
     if (bytes > 0) {
-        std::string res(buf);
+        std::string res(buf, bytes);
         if (res.find("HTTP/1.") != std::string::npos || res.find("HTTP/2") != std::string::npos) {
             size_t srv_pos = res.find("Server: ");
             if (srv_pos == std::string::npos) srv_pos = res.find("server: ");
             if (srv_pos != std::string::npos) {
                 size_t eol = res.find("\r\n", srv_pos);
-                std::string srv_val = res.substr(srv_pos + 8, eol - (srv_pos + 8));
-                return "http (" + srv_val + ")";
+                if (eol != std::string::npos && eol >= srv_pos + 8) {
+                    std::string srv_val = res.substr(srv_pos + 8, eol - (srv_pos + 8));
+                    return "http (" + srv_val + ")";
+                }
             }
             return "http (web server)";
         }
@@ -180,13 +193,13 @@ PortResult scan_port(const std::string& ip, int port, int timeout_ms) {
         pfd.fd = sock;
         pfd.events = POLLOUT;
         int poll_res = WSAPoll(&pfd, 1, timeout_ms);
-        bool write_ready = (poll_res > 0 && (pfd.revents & POLLOUT));
+        bool write_ready = (poll_res > 0 && (pfd.revents & POLLOUT) && !(pfd.revents & (POLLERR | POLLHUP)));
 #else
         struct pollfd pfd{};
         pfd.fd = sock;
         pfd.events = POLLOUT;
         int poll_res = poll(&pfd, 1, timeout_ms);
-        bool write_ready = (poll_res > 0 && (pfd.revents & POLLOUT));
+        bool write_ready = (poll_res > 0 && (pfd.revents & POLLOUT) && !(pfd.revents & (POLLERR | POLLHUP)));
 #endif
 
         if (write_ready) {
@@ -208,7 +221,7 @@ PortResult scan_port(const std::string& ip, int port, int timeout_ms) {
 
     if (is_open) {
         result.status = PortStatus::OPEN;
-        result.service_name = grab_banner(sock, port, timeout_ms);
+        result.service_name = grab_banner(sock, port, timeout_ms, ip);
     }
 
     CLOSE_SOCKET(sock);
@@ -221,7 +234,7 @@ std::vector<HostResult> scan_all(const ScanConfig& config, ThreadPool& pool) {
     // Initialize host structures
     for (size_t i = 0; i < config.target_ips.size(); ++i) {
         host_results[i].ip = config.target_ips[i];
-        host_results[i].hostname = TargetHelper::resolve_hostname(config.target_ips[i]);
+        host_results[i].hostname = ""; // Lazy resolve later when reporting
         host_results[i].ports.resize(config.ports.size());
     }
 

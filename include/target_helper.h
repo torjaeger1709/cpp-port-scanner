@@ -3,7 +3,7 @@
 
 #include <string>
 #include <vector>
-#include <cstdint>
+#include <functional>
 
 namespace TargetHelper {
 
@@ -17,7 +17,7 @@ namespace TargetHelper {
     bool is_valid_ipv4(const std::string& ip);
 
     // Resolve raw target (IP, Domain, CIDR) into a list of IPv4 addresses
-    std::vector<std::string> resolve_targets(const std::string& raw_target);
+    std::vector<std::string> resolve_targets(const std::string& raw_target, const std::function<void(const std::string&)>& log_cb = nullptr);
 
     // Reverse DNS lookup from IP to Hostname
     std::string resolve_hostname(const std::string& ip);
