@@ -1,28 +1,42 @@
-# C++ Modular Port Scanner & Dear ImGui Desktop
+# C++ Network Port Scanner & Desktop GUI
 
-Modern **C++17** network port scanner featuring a reusable scanning engine, multi-threaded architecture, raw socket scanning techniques, and a Dear ImGui desktop interface.
+**C++17** network port scanner featuring concurrent execution, raw socket scanning techniques, and a Dear ImGui desktop interface.
 
 ---
 
-## Desktop Preview
+## Project Goals
 
+This project was built primarily to explore and demonstrate practical C++ engineering concepts:
+- Low-level socket programming
+- Cross-platform networking implementation
+- Multithreading and worker synchronization
+- Desktop application development with Dear ImGui
+- Raw TCP packet construction
+
+---
+
+## Previews
+
+### Desktop GUI
 ![Desktop Preview](assets/gui_preview.png)
+
+### CLI Execution
+![CLI Preview](assets/cli_preview.png)
 
 ---
 
 # Features
 
 * Cross-platform CLI & GUI scanner (Windows & Linux)
-* Native Dear ImGui desktop application (DirectX 11 & OpenGL 3)
-* Modular MVC architecture
-* Multi-threaded scanning engine
-* Reusable thread pool
+* Dear ImGui desktop application (Windows GUI: DirectX 11, Linux GUI: OpenGL 3)
+* Layered architecture (Separated scanning engine and GUI)
+* Concurrent scanning using a custom thread pool
 * TCP Connect scanning
-* SYN / FIN / NULL / XMAS raw scans
-* Protocol-aware banner grabbing
+* SYN / FIN / NULL / XMAS raw scans (Linux fully supported; Windows requires Npcap)
+* Basic banner grabbing
 * CIDR subnet scanning
 * JSON / CSV / XML report export
-* Graceful scan cancellation
+* Scan cancellation token support
 * WSAPoll / poll asynchronous I/O multiplexing
 
 ---
@@ -40,7 +54,7 @@ graph TD
     ThreadPool --> Network["Sockets / WSAPoll / poll"]
 ```
 
-## MVC Design
+## Layered Architecture
 
 ### Model
 
@@ -85,7 +99,7 @@ Responsible for:
 * Interactive scan configuration
 * Live console
 * Result tables
-* Responsive layouts
+* Dynamic layouts
 
 Location:
 
@@ -116,21 +130,35 @@ src/gui_view.cpp
 
 # Engineering Notes
 
-### Responsive Desktop UI
+### Asynchronous UI Execution
 
-Scanning is executed entirely on background worker threads, allowing the GUI to remain responsive throughout long-running scans.
+Scanning tasks run on background worker threads so that the interface window continues processing user input and redrawing during scans.
 
-### Efficient Synchronization
+### Thread Synchronization
 
-The scanning engine minimizes mutex contention by combining atomic counters with preallocated storage for scan results.
+The scanning engine uses mutex locking and atomic counters to safely manage concurrent access across worker threads.
 
 ### Graceful Shutdown
 
 Closing the application during an active scan signals cancellation tokens, waits for worker threads to finish, and releases resources safely.
 
-### Cross-Platform Networking
+### Networking Implementation
 
-Networking is abstracted behind a common interface using Winsock on Windows and POSIX sockets on Linux.
+Platform-specific socket implementations are isolated where possible to support both Winsock and POSIX sockets.
+
+---
+
+# Dependencies
+
+The project keeps third-party dependencies minimal to simplify cross-platform builds:
+
+| Dependency | Purpose | Management / Installation |
+| :--- | :--- | :--- |
+| **Dear ImGui** (v1.90.1) | Desktop GUI UI framework | Automatically fetched and compiled via CMake `FetchContent` |
+| **SDL2** | Windowing and event handling (Linux GUI) | System package (`libsdl2-dev` on Ubuntu/Debian) |
+| **OpenGL 3.3** | Graphics rendering backend (Linux GUI) | System package (`libgl1-mesa-dev` on Ubuntu/Debian) |
+| **DirectX 11 & Win32 SDK** | Graphics rendering backend (Windows GUI) | Included in Windows SDK / Visual Studio C++ toolchain |
+| **Winsock2 (`ws2_32`) / POSIX Sockets** | Core network TCP/UDP scanning | Native OS system libraries |
 
 ---
 
@@ -285,6 +313,6 @@ This project is licensed under the MIT License.
 
 ---
 
-# Author
+## Contributing
 
-**Khiem Nguyen**
+Contributions, issues, and suggestions are welcome.
