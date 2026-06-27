@@ -12,8 +12,8 @@ Modern **C++17** network port scanner featuring a reusable scanning engine, mult
 
 # Features
 
-* Cross-platform CLI scanner (Windows & Linux)
-* Native Dear ImGui desktop application
+* Cross-platform CLI & GUI scanner (Windows & Linux)
+* Native Dear ImGui desktop application (DirectX 11 & OpenGL 3)
 * Modular MVC architecture
 * Multi-threaded scanning engine
 * Reusable thread pool
@@ -100,7 +100,7 @@ src/gui_view.cpp
 | Feature          | CLI | GUI |
 | ---------------- | --- | --- |
 | Windows          | ✅   | ✅   |
-| Linux            | ✅   | ❌   |
+| Linux            | ✅   | ✅   |
 | TCP Connect Scan | ✅   | ✅   |
 | SYN Scan         | ✅   | ✅   |
 | FIN Scan         | ✅   | ✅   |
@@ -167,7 +167,7 @@ Install dependencies
 ```bash
 sudo apt update
 
-sudo apt install build-essential cmake git
+sudo apt install build-essential cmake git libsdl2-dev libgl1-mesa-dev
 ```
 
 Build
@@ -178,10 +178,14 @@ cmake -B build -S .
 cmake --build build -j$(nproc)
 ```
 
-Generated binary
+> **Note for WSL users working on Windows mounted drives (`/mnt/c`, `/mnt/d`):** To avoid NTFS file permission errors, specify a build path inside the Linux filesystem instead: `cmake -B ~/build_scanner -S .`
+
+Generated binaries
 
 ```text
-./build/port_scanner
+build/
+├── port_scanner
+└── port_scanner_gui
 ```
 
 ---
@@ -190,8 +194,14 @@ Generated binary
 
 ## Launch GUI
 
+### Windows
 ```powershell
 .\build\port_scanner_gui.exe
+```
+
+### Linux
+```bash
+./build/port_scanner_gui
 ```
 
 Steps
