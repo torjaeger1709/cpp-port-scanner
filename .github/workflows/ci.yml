@@ -13,10 +13,8 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            cmake_generator: "Visual Studio 17 2022"
             build_config: Release
           - os: ubuntu-latest
-            cmake_generator: "Unix Makefiles"
             build_config: Release
 
     runs-on: ${{ matrix.os }}
@@ -27,12 +25,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure CMake
-        run: >
-          cmake -B build
-          -G "${{ matrix.cmake_generator }}"
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_config }}
-          -DBUILD_GUI=OFF
-          -DBUILD_TESTING=ON
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_config }} -DBUILD_GUI=OFF -DBUILD_TESTING=ON
 
       - name: Build
         run: cmake --build build --config ${{ matrix.build_config }}
