@@ -130,6 +130,16 @@ static std::string grab_banner(SOCKET sock, int port, int timeout_ms, const std:
         }
     }
 
+    // Skip HTTP probe for well-known non-HTTP services to avoid sending
+    // garbage HTTP GET to protocols like MySQL, Redis, PostgreSQL, etc.
+    static const int non_http_ports[] = {
+        21, 22, 23, 25, 53, 110, 143, 135, 139, 445,
+        1433, 1521, 3306, 3389, 5432, 6379
+    };
+    for (int np : non_http_ports) {
+        if (port == np) return get_service_name(port);
+    }
+
     // Stage 2: Active Banner Grabbing (Client-speak-first: HTTP, etc.)
     // Proactively transmit HTTP GET probe with Host header
     std::string http_probe = "GET / HTTP/1.1\r\nHost: " + ip + "\r\nUser-Agent: CppPortScanner/1.0\r\nConnection: close\r\n\r\n";
@@ -234,7 +244,7 @@ std::vector<HostResult> scan_all(const ScanConfig& config, ThreadPool& pool) {
     // Initialize host structures
     for (size_t i = 0; i < config.target_ips.size(); ++i) {
         host_results[i].ip = config.target_ips[i];
-        host_results[i].hostname = ""; // Lazy resolve later when reporting
+        host_results[i].hostname = ""; // Resolved in parallel after scan completes
         host_results[i].ports.resize(config.ports.size());
     }
 
@@ -250,8 +260,13 @@ std::vector<HostResult> scan_all(const ScanConfig& config, ThreadPool& pool) {
         case ScanType::CONNECT: default: break;
     }
 
-    std::cout << "[*] Starting " << scan_desc << " of " << total_tasks << " targets ("
-              << config.target_ips.size() << " hosts x " << config.ports.size() << " ports) using reusable ThreadPool & WSAPoll...\n";
+    std::string start_msg = "[*] Starting " + scan_desc + " of " + std::to_string(total_tasks) + " targets ("
+              + std::to_string(config.target_ips.size()) + " hosts x " + std::to_string(config.ports.size()) + " ports) using ThreadPool & WSAPoll...";
+    if (config.log_cb) {
+        config.log_cb(start_msg);
+    } else {
+        std::cout << start_msg << "\n";
+    }
 
     for (size_t h = 0; h < config.target_ips.size(); ++h) {
         for (size_t p = 0; p < config.ports.size(); ++p) {
@@ -288,7 +303,9 @@ std::vector<HostResult> scan_all(const ScanConfig& config, ThreadPool& pool) {
     if (config.log_cb) {
         config.log_cb("[*] Scan execution finished.");
     }
-    std::cout << "[+] Scan completed.\n\n";
+    if (!config.log_cb) {
+        std::cout << "[+] Scan completed.\n\n";
+    }
     return host_results;
 }
 

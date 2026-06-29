@@ -51,6 +51,17 @@ int main(int argc, char* argv[]) {
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;
 
+    // Resolve hostnames in parallel before report generation.
+    // Previously, getnameinfo() was called lazily during report export,
+    // blocking the main thread for each host with no timeout.
+    std::cout << "[*] Resolving reverse DNS for " << results.size() << " host(s)...\n";
+    for (size_t i = 0; i < results.size(); ++i) {
+        pool.enqueue([&results, i]() {
+            results[i].hostname = TargetHelper::resolve_hostname(results[i].ip);
+        });
+    }
+    pool.wait_until_empty();
+
     // Display scan report in console
     ReportGenerator::print_console(results);
 

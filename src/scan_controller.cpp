@@ -24,9 +24,9 @@ ScanController::~ScanController() {
 }
 
 void ScanController::start_scan(const ScanConfig& user_config) {
-    std::lock_guard<std::mutex> lock(state_mutex);
-    if (scanning.load()) return;
-
+    // Phase 1: Join previous threads WITHOUT holding state_mutex.
+    // scan_thread needs state_mutex to set scanning=false before it exits,
+    // so holding state_mutex here while joining would deadlock.
     if (background_cleaner.joinable()) {
         background_cleaner.join();
     }
@@ -34,10 +34,14 @@ void ScanController::start_scan(const ScanConfig& user_config) {
         scan_thread.join();
     }
 
+    // Phase 2: Initialize new scan under lock
+    std::lock_guard<std::mutex> lock(state_mutex);
+    if (scanning.load()) return;
+
     scanning = true;
     cancel_token = std::make_shared<std::atomic<bool>>(false);
     completed_count = 0;
-    total_count = 1; // Prevent 0 division before target expansion
+    total_count = 0;
 
     current_config = user_config;
     RawSocket::reset_warnings();
@@ -91,6 +95,20 @@ void ScanController::start_scan(const ScanConfig& user_config) {
 
         auto res = ScannerEngine::scan_all(current_config, *pool);
 
+        // Resolve hostnames in parallel using the existing thread pool.
+        // This runs on the scan thread (not GUI thread) to prevent UI freeze
+        // that previously occurred when get_hostname_lazy() called getnameinfo()
+        // synchronously during report export on the calling thread.
+        if (!(cancel_token && cancel_token->load()) && !res.empty()) {
+            add_log("[*] Resolving reverse DNS for " + std::to_string(res.size()) + " host(s)...");
+            for (size_t i = 0; i < res.size(); ++i) {
+                pool->enqueue([&res, i]() {
+                    res[i].hostname = TargetHelper::resolve_hostname(res[i].ip);
+                });
+            }
+            pool->wait_until_empty();
+        }
+
         {
             std::lock_guard<std::mutex> res_lock(results_mutex);
             host_results = std::move(res);
@@ -105,22 +123,27 @@ void ScanController::start_scan(const ScanConfig& user_config) {
 }
 
 void ScanController::stop_scan() {
-    std::lock_guard<std::mutex> lock(state_mutex);
-    if (!scanning.load() && !scan_thread.joinable()) return;
-
-    add_log("[Warning] Cancellation requested. Stopping worker pool...");
-    if (cancel_token) {
-        cancel_token->store(true);
-    }
-    
-    if (pool) {
-        pool->clear_queue();
-    }
-    scanning = false;
-
+    // Join old cleaner WITHOUT holding state_mutex to prevent deadlock.
+    // background_cleaner waits for scan_thread, which needs state_mutex to finish.
     if (background_cleaner.joinable()) {
         background_cleaner.join();
     }
+
+    {
+        std::lock_guard<std::mutex> lock(state_mutex);
+        if (!scanning.load() && !scan_thread.joinable()) return;
+
+        add_log("[Warning] Cancellation requested. Stopping worker pool...");
+        if (cancel_token) {
+            cancel_token->store(true);
+        }
+        
+        if (pool) {
+            pool->clear_queue();
+        }
+        scanning = false;
+    }
+    // state_mutex released — scan_thread can now acquire it and finish gracefully.
 
     if (scan_thread.joinable()) {
         background_cleaner = std::thread([t = std::move(scan_thread), p = std::move(pool), this]() mutable {

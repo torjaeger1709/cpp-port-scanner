@@ -103,13 +103,18 @@ public:
     }
 
     void stop_and_cleanup() {
+        std::thread thread_to_join;
         {
             std::unique_lock<std::shared_mutex> lock(mtx);
             running = false;
             expectations.clear();
+            // Move thread out under lock. After this, member sniffer_thread
+            // is not joinable, so a concurrent ensure_running() call won't
+            // trigger std::terminate by assigning to a joinable thread.
+            thread_to_join = std::move(sniffer_thread);
         }
-        if (sniffer_thread.joinable()) {
-            sniffer_thread.join();
+        if (thread_to_join.joinable()) {
+            thread_to_join.join();
         }
     }
 
