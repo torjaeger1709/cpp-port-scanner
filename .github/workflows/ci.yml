@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            cmake_generator: "Visual Studio 17 2022"
+            build_config: Release
+          - os: ubuntu-latest
+            cmake_generator: "Unix Makefiles"
+            build_config: Release
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: >
+          cmake -B build
+          -G "${{ matrix.cmake_generator }}"
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_config }}
+          -DBUILD_GUI=OFF
+          -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_config }}
+
+      - name: Run Tests
+        working-directory: build
+        run: ctest --output-on-failure -C ${{ matrix.build_config }} --timeout 60

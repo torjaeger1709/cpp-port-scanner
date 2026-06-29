@@ -14,6 +14,7 @@ static std::string status_to_str(PortStatus status) {
         case PortStatus::OPEN: return "OPEN";
         case PortStatus::CLOSED: return "CLOSED";
         case PortStatus::FILTERED: return "FILTERED";
+        case PortStatus::OPEN_FILTERED: return "OPEN|FILTERED";
     }
     return "UNKNOWN";
 }
@@ -23,6 +24,7 @@ static std::string status_to_lower(PortStatus status) {
         case PortStatus::OPEN: return "open";
         case PortStatus::CLOSED: return "closed";
         case PortStatus::FILTERED: return "filtered";
+        case PortStatus::OPEN_FILTERED: return "open|filtered";
     }
     return "unknown";
 }
@@ -59,7 +61,7 @@ void print_console(const std::vector<HostResult>& results) {
 
         int open_count = 0;
         for (const auto& p : host.ports) {
-            if (p.status == PortStatus::OPEN) open_count++;
+            if (p.status == PortStatus::OPEN || p.status == PortStatus::OPEN_FILTERED) open_count++;
         }
 
         if (open_count == 0) {
@@ -73,10 +75,11 @@ void print_console(const std::vector<HostResult>& results) {
         std::cout << "---------------------------------------------------------\n";
 
         for (const auto& p : host.ports) {
-            if (p.status == PortStatus::OPEN) {
+            if (p.status == PortStatus::OPEN || p.status == PortStatus::OPEN_FILTERED) {
                 std::string port_proto = std::to_string(p.port) + "/tcp";
+                std::string state = (p.status == PortStatus::OPEN_FILTERED) ? "open|filtered" : "open";
                 std::cout << std::left << std::setw(10) << port_proto
-                          << std::setw(12) << "open"
+                          << std::setw(16) << state
                           << p.service_name << "\n";
             }
         }

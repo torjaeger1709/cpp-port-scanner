@@ -11,7 +11,8 @@
 enum class PortStatus {
     OPEN,
     CLOSED,
-    FILTERED
+    FILTERED,
+    OPEN_FILTERED   // RFC 793: No response to FIN/NULL/XMAS → cannot distinguish open vs filtered
 };
 
 enum class OutputFormat {

@@ -301,6 +301,8 @@ void render_ui(ScanController& controller) {
                     ImGui::TableSetColumnIndex(4);
                     if (item.status == PortStatus::OPEN) {
                         ImGui::TextColored(ImVec4(0.05f, 0.85f, 0.55f, 1.0f), "OPEN");
+                    } else if (item.status == PortStatus::OPEN_FILTERED) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.0f, 1.0f), "OPEN|FILTERED");
                     } else if (item.status == PortStatus::FILTERED) {
                         ImGui::TextColored(ImVec4(0.98f, 0.75f, 0.10f, 1.0f), "FILTERED");
                     } else {

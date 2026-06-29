@@ -1,7 +1,10 @@
-# Build Directories
-build/
+# Build Directories & Caches
+build*/
 out/
 bin/
+.cache/
+*.ilk
+*.exp
 
 # Temporary Scan Reports & Exports
 *.json

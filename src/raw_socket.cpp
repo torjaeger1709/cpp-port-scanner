@@ -26,6 +26,7 @@
 #include <shared_mutex>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 
 #ifdef _WIN32
@@ -70,6 +71,48 @@ static uint16_t get_random_u16(uint16_t min_val, uint16_t max_val) {
     std::uniform_int_distribution<uint16_t> dist(min_val, max_val);
     return dist(generator);
 }
+
+// Thread-safe source port pool to prevent collisions between concurrent probes
+class SourcePortPool {
+public:
+    static SourcePortPool& instance() {
+        static SourcePortPool pool;
+        return pool;
+    }
+
+    uint16_t acquire() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        for (int attempts = 0; attempts < 1000; ++attempts) {
+            uint16_t port = get_random_u16(49152, 65535);
+            if (in_use_.find(port) == in_use_.end()) {
+                in_use_.insert(port);
+                return port;
+            }
+        }
+        // Fallback: extremely unlikely — all ports in use
+        uint16_t port = get_random_u16(49152, 65535);
+        return port;
+    }
+
+    void release(uint16_t port) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        in_use_.erase(port);
+    }
+
+private:
+    SourcePortPool() = default;
+    std::mutex mtx_;
+    std::unordered_set<uint16_t> in_use_;
+};
+
+// RAII guard to ensure source port is always released
+struct SourcePortGuard {
+    uint16_t port;
+    SourcePortGuard(uint16_t p) : port(p) {}
+    ~SourcePortGuard() { SourcePortPool::instance().release(port); }
+    SourcePortGuard(const SourcePortGuard&) = delete;
+    SourcePortGuard& operator=(const SourcePortGuard&) = delete;
+};
 
 // Multi-thread shared sniffer dispatcher
 class RawSnifferDispatcher {
@@ -301,7 +344,8 @@ PortResult raw_tcp_scan_port(const std::string& target_ip, int port, int timeout
     inet_pton(AF_INET, local_ip.c_str(), &src_addr);
     inet_pton(AF_INET, target_ip.c_str(), &dst_addr);
 
-    uint16_t src_port = get_random_u16(49152, 65535);
+    uint16_t src_port = SourcePortPool::instance().acquire();
+    SourcePortGuard src_port_guard(src_port);
 
     alignas(4) char packet[sizeof(IPv4Header) + sizeof(TCPHeader)]{};
     auto* ip = reinterpret_cast<IPv4Header*>(packet);
@@ -384,7 +428,7 @@ PortResult raw_tcp_scan_port(const std::string& target_ip, int port, int timeout
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
-    PortStatus default_status = (type == ScanType::SYN) ? PortStatus::FILTERED : PortStatus::OPEN;
+    PortStatus default_status = (type == ScanType::SYN) ? PortStatus::FILTERED : PortStatus::OPEN_FILTERED;
     PortResult result{port, default_status, ScannerEngine::get_service_name(port)};
 
     int status = exp.result_status.load();

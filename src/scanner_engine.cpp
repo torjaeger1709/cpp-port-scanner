@@ -130,15 +130,17 @@ static std::string grab_banner(SOCKET sock, int port, int timeout_ms, const std:
         }
     }
 
-    // Skip HTTP probe for well-known non-HTTP services to avoid sending
-    // garbage HTTP GET to protocols like MySQL, Redis, PostgreSQL, etc.
-    static const int non_http_ports[] = {
-        21, 22, 23, 25, 53, 110, 143, 135, 139, 445,
-        1433, 1521, 3306, 3389, 5432, 6379
+    // Only send HTTP probe to well-known HTTP/HTTPS ports (whitelist approach)
+    // to avoid sending garbage HTTP GET to binary protocols
+    static const int http_ports[] = {
+        80, 443, 8080, 8443, 8000, 8888, 3000, 3443,
+        5000, 5443, 8081, 8082, 9000, 9090, 9443
     };
-    for (int np : non_http_ports) {
-        if (port == np) return get_service_name(port);
+    bool is_http_port = false;
+    for (int hp : http_ports) {
+        if (port == hp) { is_http_port = true; break; }
     }
+    if (!is_http_port) return get_service_name(port);
 
     // Stage 2: Active Banner Grabbing (Client-speak-first: HTTP, etc.)
     // Proactively transmit HTTP GET probe with Host header
@@ -287,7 +289,7 @@ std::vector<HostResult> scan_all(const ScanConfig& config, ThreadPool& pool) {
                 // Slot-based thread-safe direct write eliminating mutex bottlenecks
                 host_results[h].ports[p] = pr;
 
-                if (pr.status == PortStatus::OPEN && config.log_cb) {
+                if ((pr.status == PortStatus::OPEN || pr.status == PortStatus::OPEN_FILTERED) && config.log_cb) {
                     config.log_cb("[+] Discovered open port " + std::to_string(port) + "/tcp on " + config.target_ips[h] + " (" + pr.service_name + ")");
                 }
 

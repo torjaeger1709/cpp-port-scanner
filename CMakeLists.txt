@@ -33,58 +33,95 @@ else()
 endif()
 
 # 2. Desktop GUI Companion Target (Dear ImGui MVC Cross-Platform)
-include(FetchContent)
-FetchContent_Declare(
-    imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.90.1
-)
-FetchContent_MakeAvailable(imgui)
+option(BUILD_GUI "Build the GUI desktop application" ON)
 
-if(WIN32)
-    add_executable(port_scanner_gui
-        src/gui_main.cpp
-        src/gui_view.cpp
-        src/scan_controller.cpp
-        ${CORE_SOURCES}
-        ${imgui_SOURCE_DIR}/imgui.cpp
-        ${imgui_SOURCE_DIR}/imgui_draw.cpp
-        ${imgui_SOURCE_DIR}/imgui_tables.cpp
-        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
+if(BUILD_GUI)
+    include(FetchContent)
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.90.1
     )
+    FetchContent_MakeAvailable(imgui)
 
-    target_include_directories(port_scanner_gui PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${imgui_SOURCE_DIR}
-        ${imgui_SOURCE_DIR}/backends
-    )
+    if(WIN32)
+        add_executable(port_scanner_gui
+            src/gui_main.cpp
+            src/gui_view.cpp
+            src/scan_controller.cpp
+            ${CORE_SOURCES}
+            ${imgui_SOURCE_DIR}/imgui.cpp
+            ${imgui_SOURCE_DIR}/imgui_draw.cpp
+            ${imgui_SOURCE_DIR}/imgui_tables.cpp
+            ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
+        )
 
-    target_link_libraries(port_scanner_gui PRIVATE ws2_32 d3d11 d3dcompiler dwmapi)
-elseif(UNIX AND NOT APPLE)
-    find_package(SDL2 REQUIRED)
-    find_package(OpenGL REQUIRED)
+        target_include_directories(port_scanner_gui PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${imgui_SOURCE_DIR}
+            ${imgui_SOURCE_DIR}/backends
+        )
 
-    add_executable(port_scanner_gui
-        src/gui_main_linux.cpp
-        src/gui_view.cpp
-        src/scan_controller.cpp
-        ${CORE_SOURCES}
-        ${imgui_SOURCE_DIR}/imgui.cpp
-        ${imgui_SOURCE_DIR}/imgui_draw.cpp
-        ${imgui_SOURCE_DIR}/imgui_tables.cpp
-        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
-    )
+        target_link_libraries(port_scanner_gui PRIVATE ws2_32 d3d11 d3dcompiler dwmapi)
+    elseif(UNIX AND NOT APPLE)
+        find_package(SDL2 REQUIRED)
+        find_package(OpenGL REQUIRED)
 
-    target_include_directories(port_scanner_gui PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${imgui_SOURCE_DIR}
-        ${imgui_SOURCE_DIR}/backends
-        ${SDL2_INCLUDE_DIRS}
-    )
+        add_executable(port_scanner_gui
+            src/gui_main_linux.cpp
+            src/gui_view.cpp
+            src/scan_controller.cpp
+            ${CORE_SOURCES}
+            ${imgui_SOURCE_DIR}/imgui.cpp
+            ${imgui_SOURCE_DIR}/imgui_draw.cpp
+            ${imgui_SOURCE_DIR}/imgui_tables.cpp
+            ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+        )
 
-    target_link_libraries(port_scanner_gui PRIVATE SDL2::SDL2 OpenGL::GL Threads::Threads)
+        target_include_directories(port_scanner_gui PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${imgui_SOURCE_DIR}
+            ${imgui_SOURCE_DIR}/backends
+            ${SDL2_INCLUDE_DIRS}
+        )
+
+        target_link_libraries(port_scanner_gui PRIVATE SDL2::SDL2 OpenGL::GL Threads::Threads)
+    endif()
 endif()
+
+# 3. Unit Tests (Google Test)
+option(BUILD_TESTING "Build unit tests" OFF)
+
+if(BUILD_TESTING)
+    enable_testing()
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.14.0
+    )
+    # Prevent overriding parent project's compiler/linker settings on Windows
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+
+    file(GLOB TEST_SOURCES tests/test_*.cpp)
+
+    add_executable(port_scanner_tests ${TEST_SOURCES} ${CORE_SOURCES})
+    target_include_directories(port_scanner_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(port_scanner_tests PRIVATE GTest::gtest_main)
+
+    if(WIN32)
+        target_link_libraries(port_scanner_tests PRIVATE ws2_32)
+    else()
+        find_package(Threads REQUIRED)
+        target_link_libraries(port_scanner_tests PRIVATE Threads::Threads)
+    endif()
+
+    include(GoogleTest)
+    gtest_discover_tests(port_scanner_tests)
+endif()
+
